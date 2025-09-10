@@ -27,3 +27,38 @@ FROM (
 )
 GROUP BY interval_start, interval_end
 ORDER BY interval_start;
+
+
+
+
+-- SQL_ID girmen gerekiyor
+DEFINE sql_id = '&&SQL_ID';
+
+SELECT sql_id,
+       plan_hash_value,
+       MIN(first_load_time) AS first_seen,
+       MAX(last_active_time) AS last_seen,
+       COUNT(DISTINCT plan_hash_value) OVER (PARTITION BY sql_id) AS total_plan_count
+FROM (
+    -- Şu anki planlar (SGA içinden)
+    SELECT sql_id,
+           plan_hash_value,
+           TO_CHAR(first_load_time, 'YYYY-MM-DD HH24:MI:SS') AS first_load_time,
+           TO_CHAR(last_active_time, 'YYYY-MM-DD HH24:MI:SS') AS last_active_time
+    FROM   v$sql
+    WHERE  sql_id = '&&sql_id'
+
+    UNION ALL
+
+    -- AWR’dan geçmiş planlar
+    SELECT sql_id,
+           plan_hash_value,
+           TO_CHAR(MIN(timestamp), 'YYYY-MM-DD HH24:MI:SS') AS first_load_time,
+           TO_CHAR(MAX(timestamp), 'YYYY-MM-DD HH24:MI:SS') AS last_active_time
+    FROM   dba_hist_sql_plan
+    WHERE  sql_id = '&&sql_id'
+    GROUP  BY sql_id, plan_hash_value
+)
+GROUP BY sql_id, plan_hash_value
+ORDER BY first_seen;
+
