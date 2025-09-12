@@ -62,3 +62,18 @@ FROM (
 GROUP BY sql_id, plan_hash_value
 ORDER BY first_seen;
 
+SELECT sql_id,
+       COUNT(DISTINCT child_number) AS child_count
+FROM   v$sql
+GROUP BY sql_id
+HAVING COUNT(DISTINCT child_number) > 1
+ORDER BY child_count DESC;
+
+
+SELECT sql_id,
+       plan_hash_value,
+       executions,
+       ROUND(elapsed_time / DECODE(executions,0,1,executions) / 1000, 3) AS avg_elapsed_ms
+FROM   v$sql
+WHERE  sql_id = '&&SQL_ID';
+
