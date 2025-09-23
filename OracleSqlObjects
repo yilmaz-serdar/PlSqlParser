@@ -1,0 +1,114 @@
+public sealed class SqlParseResult
+{
+    public string CommandType { get; set; } = string.Empty; // INSERT, UPDATE, DELETE, SELECT
+    public IReadOnlyCollection<string> ObjectNames { get; set; } = Array.Empty<string>();
+}
+
+public static class OracleSqlObjects
+{
+    public static SqlParseResult ExtractSqlInfo(string sql)
+    {
+        // 1) Input'u case-insensitive parse için upper-case'e çeviriyoruz
+        var input = new AntlrInputStream(sql);
+        var upper = new CaseChangingCharStream(input, true);
+
+        // 2) Lexer/Parser
+        var lexer = new PlSqlLexer(upper);
+        var tokens = new CommonTokenStream(lexer);
+        var parser = new PlSqlParser(tokens)
+        {
+            // Hata oluşursa parse durur
+            ErrorHandler = new BailErrorStrategy()
+        };
+
+        // 3) Giriş noktası (script birden çok statement içerebilir)
+        var tree = parser.sql_script();
+
+        // 4) Visitor ile tabloları ve DML tipini çıkar
+        var visitor = new ObjectNameVisitor(tokens);
+        visitor.Visit(tree);
+
+        return new SqlParseResult
+        {
+            CommandType = visitor.CommandType,
+            ObjectNames = visitor.Results
+        };
+    }
+
+    private sealed class ObjectNameVisitor : PlSqlParserBaseVisitor<object>
+    {
+        private readonly CommonTokenStream _tokens;
+        private readonly HashSet<string> _names = new(StringComparer.OrdinalIgnoreCase);
+
+        public ObjectNameVisitor(CommonTokenStream tokens) => _tokens = tokens;
+
+        public IReadOnlyCollection<string> Results => _names;
+        public string CommandType { get; private set; } = string.Empty;
+
+        // DML tipini yakala
+        public override object VisitInsert_statement(PlSqlParser.Insert_statementContext context)
+        {
+            CommandType = "INSERT";
+            return base.VisitInsert_statement(context);
+        }
+
+        public override object VisitUpdate_statement(PlSqlParser.Update_statementContext context)
+        {
+            CommandType = "UPDATE";
+            return base.VisitUpdate_statement(context);
+        }
+
+        public override object VisitDelete_statement(PlSqlParser.Delete_statementContext context)
+        {
+            CommandType = "DELETE";
+            return base.VisitDelete_statement(context);
+        }
+
+        public override object VisitSelect_statement(PlSqlParser.Select_statementContext context)
+        {
+            CommandType = "SELECT";
+            return base.VisitSelect_statement(context);
+        }
+
+        // Tablo/View isimlerini yakala
+        public override object? VisitTableview_name(PlSqlParser.Tableview_nameContext context)
+        {
+            AddQualifiedName(context);
+            return base.VisitTableview_name(context);
+        }
+
+        public override object? VisitTable_name(PlSqlParser.Table_nameContext context)
+        {
+            AddQualifiedName(context);
+            return base.VisitTable_name(context);
+        }
+
+        private void AddQualifiedName(ParserRuleContext ctx)
+        {
+            var parts = new List<string>();
+            for (int i = 0; i < ctx.ChildCount; i++)
+            {
+                var text = ctx.GetChild(i).GetText();
+                if (text == ".") continue;
+
+                // Çift tırnaklı isimleri temizle
+                if (text.Length >= 2 && text[0] == '"' && text[^1] == '"')
+                    text = text.Substring(1, text.Length - 2);
+
+                if (!string.IsNullOrWhiteSpace(text))
+                    parts.Add(text);
+            }
+
+            if (parts.Count > 0)
+            {
+                string name = string.Join(".", parts);
+
+                // DB link varsa at (optional)
+                int atIndex = name.IndexOf('@');
+                if (atIndex >= 0) name = name.Substring(0, atIndex);
+
+                _names.Add(name);
+            }
+        }
+    }
+}
