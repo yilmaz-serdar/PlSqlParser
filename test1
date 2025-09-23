@@ -1,0 +1,114 @@
+public sealed class SqlObjectUsage
+{
+    public string ObjectName { get; set; } = string.Empty;
+    public string UsageType { get; set; } = string.Empty; // INSERT, UPDATE, DELETE, SELECT
+}
+
+public sealed class SqlParseResult
+{
+    public IReadOnlyCollection<SqlObjectUsage> ObjectUsages { get; set; } = Array.Empty<SqlObjectUsage>();
+}
+
+
+public static class OracleSqlObjects
+{
+    public static SqlParseResult ExtractSqlInfo(string sql)
+    {
+        var input = new AntlrInputStream(sql);
+        var upper = new CaseChangingCharStream(input, true);
+
+        var lexer = new PlSqlLexer(upper);
+        var tokens = new CommonTokenStream(lexer);
+        var parser = new PlSqlParser(tokens)
+        {
+            ErrorHandler = new BailErrorStrategy()
+        };
+
+        var tree = parser.sql_script();
+
+        var visitor = new ObjectNameVisitor(tokens);
+        visitor.Visit(tree);
+
+        return new SqlParseResult
+        {
+            ObjectUsages = visitor.Results
+        };
+    }
+
+    private sealed class ObjectNameVisitor : PlSqlParserBaseVisitor<object>
+    {
+        private readonly CommonTokenStream _tokens;
+        private readonly List<SqlObjectUsage> _usages = new();
+        private string _currentContext = string.Empty;
+
+        public ObjectNameVisitor(CommonTokenStream tokens) => _tokens = tokens;
+
+        public IReadOnlyCollection<SqlObjectUsage> Results => _usages;
+
+        public override object VisitInsert_statement(PlSqlParser.Insert_statementContext context)
+        {
+            _currentContext = "INSERT";
+            return base.VisitInsert_statement(context);
+        }
+
+        public override object VisitUpdate_statement(PlSqlParser.Update_statementContext context)
+        {
+            _currentContext = "UPDATE";
+            return base.VisitUpdate_statement(context);
+        }
+
+        public override object VisitDelete_statement(PlSqlParser.Delete_statementContext context)
+        {
+            _currentContext = "DELETE";
+            return base.VisitDelete_statement(context);
+        }
+
+        public override object VisitSelect_statement(PlSqlParser.Select_statementContext context)
+        {
+            _currentContext = "SELECT";
+            return base.VisitSelect_statement(context);
+        }
+
+        public override object? VisitTableview_name(PlSqlParser.Tableview_nameContext context)
+        {
+            AddQualifiedName(context);
+            return base.VisitTableview_name(context);
+        }
+
+        public override object? VisitTable_name(PlSqlParser.Table_nameContext context)
+        {
+            AddQualifiedName(context);
+            return base.VisitTable_name(context);
+        }
+
+        private void AddQualifiedName(ParserRuleContext ctx)
+        {
+            var parts = new List<string>();
+            for (int i = 0; i < ctx.ChildCount; i++)
+            {
+                var text = ctx.GetChild(i).GetText();
+                if (text == ".") continue;
+
+                if (text.Length >= 2 && text[0] == '"' && text[^1] == '"')
+                    text = text.Substring(1, text.Length - 2);
+
+                if (!string.IsNullOrWhiteSpace(text))
+                    parts.Add(text);
+            }
+
+            if (parts.Count > 0)
+            {
+                string name = string.Join(".", parts);
+                int atIndex = name.IndexOf('@');
+                if (atIndex >= 0) name = name.Substring(0, atIndex);
+
+                // Aynı tablo farklı kullanımda eklenebilir (ör: employees hem UPDATE hem SELECT olabilir)
+                _usages.Add(new SqlObjectUsage
+                {
+                    ObjectName = name,
+                    UsageType = _currentContext
+                });
+            }
+        }
+    }
+}
