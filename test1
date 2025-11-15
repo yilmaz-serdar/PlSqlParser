@@ -59,3 +59,41 @@
     box-shadow: 0 0 0 0.2rem rgba(156, 39, 176, 0.25) !important;
     outline: none !important;
 }
+
+
+const dateInput = document.getElementById("dateInput");
+
+dateInput.addEventListener("input", function (e) {
+    let v = e.target.value;
+
+    // Sadece rakamları al
+    v = v.replace(/\D/g, "");
+
+    // Gün
+    if (v.length > 2) {
+        v = v.slice(0, 2) + "." + v.slice(2);
+    }
+
+    // Ay
+    if (v.length > 5) {
+        v = v.slice(0, 5) + "." + v.slice(5);
+    }
+
+    // Yıl (max 4 hane)
+    if (v.length > 10) {
+        v = v.slice(0, 10);
+    }
+
+    e.target.value = v;
+});
+
+// Sadece rakam, backspace, delete, ok tuşlarına izin ver
+dateInput.addEventListener("keydown", function(e) {
+    const allowedKeys = [
+        "Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"
+    ];
+    if (allowedKeys.includes(e.key)) return;
+    if (!/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+    }
+});
