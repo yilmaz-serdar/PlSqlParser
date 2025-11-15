@@ -1,114 +1,47 @@
-public sealed class SqlObjectUsage
-{
-    public string ObjectName { get; set; } = string.Empty;
-    public string UsageType { get; set; } = string.Empty; // INSERT, UPDATE, DELETE, SELECT
+/* SELECT2 – Normal combobox stiline benzeyecek şekilde düzenleme */
+.select2-container--default .select2-selection--single {
+    height: 38px !important;            /* Orijinal input yüksekliği */
+    border: 1px solid #ced4da !important;
+    border-radius: 4px !important;       /* Sağdaki combonun radius’u */
+    padding: 5px 10px !important;
+    font-size: 14px;
+    display: flex;
+    align-items: center;                 /* Yazıyı dikey ortala */
+    background-color: #fff;
 }
 
-public sealed class SqlParseResult
-{
-    public IReadOnlyCollection<SqlObjectUsage> ObjectUsages { get; set; } = Array.Empty<SqlObjectUsage>();
+/* Seçilen text hizalama */
+.select2-container--default .select2-selection__rendered {
+    line-height: 28px !important; 
+    color: #495057 !important;
+    font-size: 14px;
+    padding-left: 0 !important;          /* Fazla padding’i kaldır */
 }
 
+/* Açılır ok ikonu hizalama */
+.select2-container--default .select2-selection__arrow {
+    height: 100% !important;
+    right: 8px !important;
+}
 
-public static class OracleSqlObjects
-{
-    public static SqlParseResult ExtractSqlInfo(string sql)
-    {
-        var input = new AntlrInputStream(sql);
-        var upper = new CaseChangingCharStream(input, true);
+/* Hover rengi */
+.select2-container--default .select2-selection--single:hover {
+    border-color: #b3b3b3 !important;
+}
 
-        var lexer = new PlSqlLexer(upper);
-        var tokens = new CommonTokenStream(lexer);
-        var parser = new PlSqlParser(tokens)
-        {
-            ErrorHandler = new BailErrorStrategy()
-        };
+/* Focus efekti */
+.select2-container--default.select2-container--focus .select2-selection--single {
+    border-color: #80bdff !important;
+    box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25) !important;
+}
 
-        var tree = parser.sql_script();
+/* Dropdown menü */
+.select2-container--default .select2-results__option {
+    font-size: 14px;
+    padding: 6px 10px;
+}
 
-        var visitor = new ObjectNameVisitor(tokens);
-        visitor.Visit(tree);
-
-        return new SqlParseResult
-        {
-            ObjectUsages = visitor.Results
-        };
-    }
-
-    private sealed class ObjectNameVisitor : PlSqlParserBaseVisitor<object>
-    {
-        private readonly CommonTokenStream _tokens;
-        private readonly List<SqlObjectUsage> _usages = new();
-        private string _currentContext = string.Empty;
-
-        public ObjectNameVisitor(CommonTokenStream tokens) => _tokens = tokens;
-
-        public IReadOnlyCollection<SqlObjectUsage> Results => _usages;
-
-        public override object VisitInsert_statement(PlSqlParser.Insert_statementContext context)
-        {
-            _currentContext = "INSERT";
-            return base.VisitInsert_statement(context);
-        }
-
-        public override object VisitUpdate_statement(PlSqlParser.Update_statementContext context)
-        {
-            _currentContext = "UPDATE";
-            return base.VisitUpdate_statement(context);
-        }
-
-        public override object VisitDelete_statement(PlSqlParser.Delete_statementContext context)
-        {
-            _currentContext = "DELETE";
-            return base.VisitDelete_statement(context);
-        }
-
-        public override object VisitSelect_statement(PlSqlParser.Select_statementContext context)
-        {
-            _currentContext = "SELECT";
-            return base.VisitSelect_statement(context);
-        }
-
-        public override object? VisitTableview_name(PlSqlParser.Tableview_nameContext context)
-        {
-            AddQualifiedName(context);
-            return base.VisitTableview_name(context);
-        }
-
-        public override object? VisitTable_name(PlSqlParser.Table_nameContext context)
-        {
-            AddQualifiedName(context);
-            return base.VisitTable_name(context);
-        }
-
-        private void AddQualifiedName(ParserRuleContext ctx)
-        {
-            var parts = new List<string>();
-            for (int i = 0; i < ctx.ChildCount; i++)
-            {
-                var text = ctx.GetChild(i).GetText();
-                if (text == ".") continue;
-
-                if (text.Length >= 2 && text[0] == '"' && text[^1] == '"')
-                    text = text.Substring(1, text.Length - 2);
-
-                if (!string.IsNullOrWhiteSpace(text))
-                    parts.Add(text);
-            }
-
-            if (parts.Count > 0)
-            {
-                string name = string.Join(".", parts);
-                int atIndex = name.IndexOf('@');
-                if (atIndex >= 0) name = name.Substring(0, atIndex);
-
-                // Aynı tablo farklı kullanımda eklenebilir (ör: employees hem UPDATE hem SELECT olabilir)
-                _usages.Add(new SqlObjectUsage
-                {
-                    ObjectName = name,
-                    UsageType = _currentContext
-                });
-            }
-        }
-    }
+.select2-container--default .select2-results__option--highlighted {
+    background-color: #007bff !important;
+    color: white !important;
 }
