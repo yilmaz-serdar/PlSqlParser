@@ -1,98 +1,29 @@
-/* SELECT2 – Normal combobox stiline benzeyecek şekilde düzenleme */
-.select2-container--default .select2-selection--single {
-    height: 38px !important;            /* Orijinal input yüksekliği */
-    border: 1px solid #ced4da !important;
-    border-radius: 4px !important;       /* Sağdaki combonun radius’u */
-    padding: 5px 10px !important;
-    font-size: 14px;
-    display: flex;
-    align-items: center;                 /* Yazıyı dikey ortala */
-    background-color: #fff;
-}
+const timeInput = document.getElementById("timeInput");
 
-/* Seçilen text hizalama */
-.select2-container--default .select2-selection__rendered {
-    line-height: 28px !important; 
-    color: #495057 !important;
-    font-size: 14px;
-    padding-left: 0 !important;          /* Fazla padding’i kaldır */
-}
-
-/* Açılır ok ikonu hizalama */
-.select2-container--default .select2-selection__arrow {
-    height: 100% !important;
-    right: 8px !important;
-}
-
-/* Hover rengi */
-.select2-container--default .select2-selection--single:hover {
-    border-color: #b3b3b3 !important;
-}
-
-/* Focus efekti */
-.select2-container--default.select2-container--focus .select2-selection--single {
-    border-color: #80bdff !important;
-    box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25) !important;
-}
-
-/* Dropdown menü */
-.select2-container--default .select2-results__option {
-    font-size: 14px;
-    padding: 6px 10px;
-}
-
-.select2-container--default .select2-results__option--highlighted {
-    background-color: #007bff !important;
-    color: white !important;
-}
-
-
-/* Select2 Focus - Mor (#9c27b0) */
-.select2-container--default.select2-container--focus .select2-selection--single {
-    border-color: #9c27b0 !important;
-    box-shadow: 0 0 0 0.2rem rgba(156, 39, 176, 0.25) !important;
-}
-
-/* Dropdown açıkken yukarıdaki stil geçerli olsun */
-.select2-container--default .select2-selection--single:focus {
-    border-color: #9c27b0 !important;
-    box-shadow: 0 0 0 0.2rem rgba(156, 39, 176, 0.25) !important;
-    outline: none !important;
-}
-
-
-const dateInput = document.getElementById("dateInput");
-
-dateInput.addEventListener("input", function (e) {
+timeInput.addEventListener("input", function (e) {
     let v = e.target.value;
 
     // Sadece rakamları al
     v = v.replace(/\D/g, "");
 
-    // Gün
+    // Saat kısmı
     if (v.length > 2) {
-        v = v.slice(0, 2) + "." + v.slice(2);
+        v = v.slice(0, 2) + ":" + v.slice(2);
     }
 
-    // Ay
+    // Max uzunluk
     if (v.length > 5) {
-        v = v.slice(0, 5) + "." + v.slice(5);
-    }
-
-    // Yıl (max 4 hane)
-    if (v.length > 10) {
-        v = v.slice(0, 10);
+        v = v.slice(0, 5);
     }
 
     e.target.value = v;
 });
 
-// Sadece rakam, backspace, delete, ok tuşlarına izin ver
-dateInput.addEventListener("keydown", function(e) {
-    const allowedKeys = [
-        "Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"
-    ];
-    if (allowedKeys.includes(e.key)) return;
+// Sadece rakam, backspace, delete, ok tuşları
+timeInput.addEventListener("keydown", function(e) {
+    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"];
+    if (allowed.includes(e.key)) return;
+
     if (!/^[0-9]$/.test(e.key)) {
         e.preventDefault();
     }
