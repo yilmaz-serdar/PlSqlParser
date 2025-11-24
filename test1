@@ -1,30 +1,42 @@
-const timeInput = document.getElementById("timeInput");
+public List<Dictionary<string, string>> ParseExplainPlan(string[] lines)
+{
+    var headerLine = lines.FirstOrDefault(x =>
+        x.Contains("| Id") && x.Contains("Operation"));
 
-timeInput.addEventListener("input", function (e) {
-    let v = e.target.value;
+    if (headerLine == null)
+        return new List<Dictionary<string, string>>();
 
-    // Sadece rakamları al
-    v = v.replace(/\D/g, "");
+    var headers = headerLine
+        .Split('|', StringSplitOptions.RemoveEmptyEntries)
+        .Select(h => h.Trim())
+        .ToList();
 
-    // Saat kısmı
-    if (v.length > 2) {
-        v = v.slice(0, 2) + ":" + v.slice(2);
+    int headerIndex = Array.IndexOf(lines, headerLine);
+
+    var dataLines = lines
+        .Skip(headerIndex + 1)
+        .Where(x => x.StartsWith("|"))
+        .ToList();
+
+    var result = new List<Dictionary<string, string>>();
+
+    foreach (var line in dataLines)
+    {
+        var cols = line
+            .Split('|', StringSplitOptions.RemoveEmptyEntries)
+            .Select(c => c.Trim())
+            .ToList();
+
+        if (cols.Count != headers.Count)
+            continue;
+
+        var dict = new Dictionary<string, string>();
+
+        for (int i = 0; i < headers.Count; i++)
+            dict[headers[i]] = cols[i];
+
+        result.Add(dict);
     }
 
-    // Max uzunluk
-    if (v.length > 5) {
-        v = v.slice(0, 5);
-    }
-
-    e.target.value = v;
-});
-
-// Sadece rakam, backspace, delete, ok tuşları
-timeInput.addEventListener("keydown", function(e) {
-    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"];
-    if (allowed.includes(e.key)) return;
-
-    if (!/^[0-9]$/.test(e.key)) {
-        e.preventDefault();
-    }
-});
+    return result;
+}
