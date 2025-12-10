@@ -1,102 +1,66 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Forms; // Mouse position için
 
 class Program
 {
-    // Mouse API
-    [DllImport("user32.dll")]
-    static extern bool SetCursorPos(int X, int Y);
-
+    // Mouse event için WinAPI
     [DllImport("user32.dll")]
     static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
 
-    const uint MOUSEEVENTF_LEFTDOWN = 0x02;
-    const uint MOUSEEVENTF_LEFTUP = 0x04;
-
-    // Keyboard API
+    // Mouse pozisyonu okumak için WinAPI
     [DllImport("user32.dll")]
-    static extern short GetAsyncKeyState(int vKey);
+    static extern bool GetCursorPos(out POINT lpPoint);
 
-    static async Task Main()
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
     {
-        Console.WriteLine("=== AUTO CLICKER (Dynamic Position) ===\n");
+        public int X;
+        public int Y;
+    }
 
-        Console.WriteLine("Mouse ile tıklamak istediğiniz noktaya gidin ve F6'ya basın...");
-        int x = 0, y = 0;
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP   = 0x0004;
 
-        // F6 ile koordinat seçme
-        await WaitForF6AndCapturePosition(pos =>
+    static void Main(string[] args)
+    {
+        Console.WriteLine("=== Basit C# Auto Clicker ===");
+        Console.WriteLine("1) Önce tıklanacak noktayı seçeceğiz.");
+        Console.WriteLine("2) Sonra kaç saniyede bir tıklanacağını gireceksin.");
+        Console.WriteLine("3) Çalışırken Q'ya basarak durdurabilirsin.\n");
+
+        // 1) Kullanıcıdan click konumunu dinamik alma
+        POINT clickPoint = GetClickPointFromUser();
+
+        Console.WriteLine($"\nSeçilen nokta: X = {clickPoint.X}, Y = {clickPoint.Y}");
+
+        // 2) Tıklama aralığını alma
+        Console.Write("\nKaç saniyede bir tıklansın? (örn: 1.5): ");
+        string intervalInput = Console.ReadLine();
+
+        if (!double.TryParse(intervalInput.Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture, out double seconds))
         {
-            x = pos.X;
-            y = pos.Y;
-            Console.WriteLine($"Seçilen konum: X={x}, Y={y}");
-        });
+            Console.WriteLine("Geçersiz sayı girdin. Program sonlandırılıyor.");
+            return;
+        }
 
-        Console.Write("\nTıklama aralığı (ms): ");
-        int interval = int.Parse(Console.ReadLine());
+        int intervalMs = (int)(seconds * 1000);
 
-        Console.WriteLine("\nF10 → Başlat");
-        Console.WriteLine("F12 → Durdur");
-        Console.WriteLine("CTRL + C → Çıkış\n");
+        Console.WriteLine($"\n{seconds} saniyede bir, X={clickPoint.X}, Y={clickPoint.Y} noktasına sol click atılacak.");
+        Console.WriteLine("Başlıyor... Durdurmak için Q tuşuna bas.\n");
 
-        CancellationTokenSource cts = new();
-
+        // 3) Auto-click döngüsü
         while (true)
         {
-            // F10 → Başlat
-            if (KeyPressed(ConsoleKey.F10))
+            // Q'ya basıldı mı kontrol et
+            if (Console.KeyAvailable)
             {
-                if (cts.IsCancellationRequested)
-                    cts = new CancellationTokenSource();
-
-                Console.WriteLine("Auto-clicker başladı...");
-                _ = StartAutoClick(x, y, interval, cts.Token);
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Q)
+                {
+                    Console.WriteLine("\nQ'ya basıldı. Program sonlandırılıyor...");
+                    break;
+                }
             }
 
-            // F12 → Durdur
-            if (KeyPressed(ConsoleKey.F12))
-            {
-                Console.WriteLine("Auto-clicker durduruldu.");
-                cts.Cancel();
-            }
-
-            await Task.Delay(100);
-        }
-    }
-
-    // Koordinat yakalama
-    static async Task WaitForF6AndCapturePosition(Action<System.Drawing.Point> callback)
-    {
-        while (true)
-        {
-            if (KeyPressed(ConsoleKey.F6))
-            {
-                var pos = Cursor.Position;
-                callback(pos);
-                return;
-            }
-            await Task.Delay(50);
-        }
-    }
-
-    static bool KeyPressed(ConsoleKey key)
-    {
-        return (GetAsyncKeyState((int)key) & 1) == 1;
-    }
-
-    static async Task StartAutoClick(int x, int y, int intervalMs, CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
-        {
-            SetCursorPos(x, y);
-
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
-
-            await Task.Delay(intervalMs, token);
-        }
-    }
-}
+            // Mouse pozisyonunu ayarla (iste
