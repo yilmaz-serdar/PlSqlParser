@@ -1,42 +1,102 @@
-public List<Dictionary<string, string>> ParseExplainPlan(string[] lines)
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms; // Mouse position için
+
+class Program
 {
-    var headerLine = lines.FirstOrDefault(x =>
-        x.Contains("| Id") && x.Contains("Operation"));
+    // Mouse API
+    [DllImport("user32.dll")]
+    static extern bool SetCursorPos(int X, int Y);
 
-    if (headerLine == null)
-        return new List<Dictionary<string, string>>();
+    [DllImport("user32.dll")]
+    static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
 
-    var headers = headerLine
-        .Split('|', StringSplitOptions.RemoveEmptyEntries)
-        .Select(h => h.Trim())
-        .ToList();
+    const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+    const uint MOUSEEVENTF_LEFTUP = 0x04;
 
-    int headerIndex = Array.IndexOf(lines, headerLine);
+    // Keyboard API
+    [DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int vKey);
 
-    var dataLines = lines
-        .Skip(headerIndex + 1)
-        .Where(x => x.StartsWith("|"))
-        .ToList();
-
-    var result = new List<Dictionary<string, string>>();
-
-    foreach (var line in dataLines)
+    static async Task Main()
     {
-        var cols = line
-            .Split('|', StringSplitOptions.RemoveEmptyEntries)
-            .Select(c => c.Trim())
-            .ToList();
+        Console.WriteLine("=== AUTO CLICKER (Dynamic Position) ===\n");
 
-        if (cols.Count != headers.Count)
-            continue;
+        Console.WriteLine("Mouse ile tıklamak istediğiniz noktaya gidin ve F6'ya basın...");
+        int x = 0, y = 0;
 
-        var dict = new Dictionary<string, string>();
+        // F6 ile koordinat seçme
+        await WaitForF6AndCapturePosition(pos =>
+        {
+            x = pos.X;
+            y = pos.Y;
+            Console.WriteLine($"Seçilen konum: X={x}, Y={y}");
+        });
 
-        for (int i = 0; i < headers.Count; i++)
-            dict[headers[i]] = cols[i];
+        Console.Write("\nTıklama aralığı (ms): ");
+        int interval = int.Parse(Console.ReadLine());
 
-        result.Add(dict);
+        Console.WriteLine("\nF10 → Başlat");
+        Console.WriteLine("F12 → Durdur");
+        Console.WriteLine("CTRL + C → Çıkış\n");
+
+        CancellationTokenSource cts = new();
+
+        while (true)
+        {
+            // F10 → Başlat
+            if (KeyPressed(ConsoleKey.F10))
+            {
+                if (cts.IsCancellationRequested)
+                    cts = new CancellationTokenSource();
+
+                Console.WriteLine("Auto-clicker başladı...");
+                _ = StartAutoClick(x, y, interval, cts.Token);
+            }
+
+            // F12 → Durdur
+            if (KeyPressed(ConsoleKey.F12))
+            {
+                Console.WriteLine("Auto-clicker durduruldu.");
+                cts.Cancel();
+            }
+
+            await Task.Delay(100);
+        }
     }
 
-    return result;
+    // Koordinat yakalama
+    static async Task WaitForF6AndCapturePosition(Action<System.Drawing.Point> callback)
+    {
+        while (true)
+        {
+            if (KeyPressed(ConsoleKey.F6))
+            {
+                var pos = Cursor.Position;
+                callback(pos);
+                return;
+            }
+            await Task.Delay(50);
+        }
+    }
+
+    static bool KeyPressed(ConsoleKey key)
+    {
+        return (GetAsyncKeyState((int)key) & 1) == 1;
+    }
+
+    static async Task StartAutoClick(int x, int y, int intervalMs, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            SetCursorPos(x, y);
+
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+
+            await Task.Delay(intervalMs, token);
+        }
+    }
 }
