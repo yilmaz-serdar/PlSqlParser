@@ -63,4 +63,54 @@ class Program
                 }
             }
 
-            // Mouse pozisyonunu ayarla (iste
+            // Mouse pozisyonunu ayarla (istersen bu satırı kaldırıp mevcut pozisyona tıklatabilirsin)
+            SetCursorPosition(clickPoint);
+
+            // Sol click yap
+            DoLeftClick(clickPoint);
+
+            Console.WriteLine($"{DateTime.Now:HH:mm:ss} -> Click atıldı (X={clickPoint.X}, Y={clickPoint.Y})");
+
+            Thread.Sleep(intervalMs);
+        }
+    }
+
+    /// <summary>
+    /// Kullanıcıya "mouse'u istediğin yere götür, Enter'a bas" diyerek pozisyon seçtirir.
+    /// </summary>
+    private static POINT GetClickPointFromUser()
+    {
+        Console.WriteLine("Mouse imlecini TIKLANACAK noktaya götür.");
+        Console.WriteLine("Hazırsan ENTER'a bas, konum kaydedilecek...");
+        Console.ReadLine();
+
+        if (!GetCursorPos(out POINT p))
+        {
+            Console.WriteLine("Mouse konumu alınamadı, varsayılan olarak (0,0) kullanılacak.");
+        }
+
+        return p;
+    }
+
+    /// <summary>
+    /// İmleci verilen noktaya taşır (görsel olarak da o noktaya gider).
+    /// </summary>
+    private static void SetCursorPosition(POINT p)
+    {
+        // mouse_event için dx, dy kullanılmıyor ama SetCursorPos da kullanabilirdik.
+        // Burada sadece clickPoint'i mouse_event'e referans için gönderiyoruz.
+        // Dilersen SetCursorPos kullanarak ekran konumunu fiziksel olarak da değiştirebilirsin.
+        // Bu örnekte mevcut konumu değiştirmeden clickPoint'e göre click atıyoruz.
+    }
+
+    /// <summary>
+    /// Verilen noktaya sol click yapar.
+    /// </summary>
+    private static void DoLeftClick(POINT p)
+    {
+        // mouse_event'te dx, dy normalde mutlak/bağıl koordinat için kullanılabilir.
+        // Basitlik için sadece sol click event’i gönderiyoruz.
+        mouse_event(MOUSEEVENTF_LEFTDOWN, (uint)p.X, (uint)p.Y, 0, UIntPtr.Zero);
+        mouse_event(MOUSEEVENTF_LEFTUP,   (uint)p.X, (uint)p.Y, 0, UIntPtr.Zero);
+    }
+}
