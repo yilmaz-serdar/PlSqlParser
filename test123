@@ -1,0 +1,144 @@
+
+<!doctype html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+
+    <style>
+        body { font-family: Arial, sans-serif; padding: 24px; }
+
+        .global-loader {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,.7);
+            z-index: 99999;
+        }
+        .global-loader.is-active { display: flex; }
+
+        .global-loader__content{
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            align-items: center;
+            padding: 10px 10px;
+            background: #fff;
+            border: 1px solid #eee;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.08);
+        }
+
+        /* GIF boyutu */
+        .loader-gif{
+            width: 175px;     /* isteğe göre değiştir */
+            /* height: 80px;     isteğe göre değiştir */
+            object-fit: contain;
+            display: block;
+        }
+
+        .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+        button { padding: 10px 14px; cursor: pointer; }
+        .box { margin-top: 18px; padding: 12px; background: #f7f7f7; border-radius: 8px; }
+        code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<h2>Loader Test Sayfası (GIF)</h2>
+<p>
+    Console’dan test: <code>GlobalLoader.show()</code> / <code>GlobalLoader.hide()</code>
+</p>
+
+<div class="row">
+    <button id="btnShow">Loader Aç</button>
+    <button id="btnHide">Loader Kapat</button>
+    <button id="btnAuto">3sn Göster → Kapat</button>
+    <button id="btnFetch">Fetch Simülasyonu (2sn)</button>
+</div>
+
+<div class="box" id="log">Log: hazır</div>
+
+<!-- Loader HTML -->
+<div id="global-loader" class="global-loader" aria-hidden="true">
+    <div class="global-loader__content">
+        <!-- Yükleniyor yazısı yerine GIF -->
+        <img class="loader-gif" src="C:\Users\srdry\Desktop\928156xf6i3uv9tv.gif" alt="Yükleniyor..." />
+    </div>
+</div>
+
+<script>
+(function () {
+    const loader = document.getElementById("global-loader");
+    const logEl = document.getElementById("log");
+
+    let pending = 0;
+    let showTimer = null;
+
+    function log(msg) {
+        logEl.textContent = "Log: " + msg;
+        console.log("[LoaderTest]", msg);
+    }
+
+    function showLoader() {
+        if (showTimer) return;
+        showTimer = setTimeout(() => {
+            loader.classList.add("is-active");
+            loader.setAttribute("aria-hidden", "false");
+            showTimer = null;
+        }, 150);
+    }
+
+    function hideLoader() {
+        if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+        loader.classList.remove("is-active");
+        loader.setAttribute("aria-hidden", "true");
+    }
+
+    function inc() { pending++; showLoader(); log("pending=" + pending + " (show)"); }
+    function dec() { pending = Math.max(0, pending - 1); log("pending=" + pending + " (hide?)"); if (pending === 0) hideLoader(); }
+
+    window.GlobalLoader = { show: inc, hide: dec };
+
+    // İlk açılış
+    loader.classList.add("is-active");
+    loader.setAttribute("aria-hidden", "false");
+    log("ilk açılış loader açık");
+
+    window.addEventListener("load", () => {
+        if (pending === 0) { hideLoader(); log("window.load -> loader kapandı"); }
+    });
+
+    document.getElementById("btnShow").addEventListener("click", () => GlobalLoader.show());
+    document.getElementById("btnHide").addEventListener("click", () => GlobalLoader.hide());
+    document.getElementById("btnAuto").addEventListener("click", () => {
+        GlobalLoader.show();
+        setTimeout(() => GlobalLoader.hide(), 3000);
+    });
+
+    // fetch wrapper
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function (...args) {
+        inc();
+        return originalFetch(...args).finally(dec);
+    };
+
+    document.getElementById("btnFetch").addEventListener("click", async () => {
+        log("fetch simülasyonu başladı (2sn)");
+        await fakeFetch2s();
+        log("fetch simülasyonu bitti");
+    });
+
+    function fakeFetch2s() {
+        return fetch("data:application/json,{\"ok\":true}")
+            .then(r => new Promise(res => setTimeout(res, 2000)).then(() => r.json()))
+            .then(data => console.log("fake data:", data));
+    }
+})();
+</script>
+
+</body>
+</html>
