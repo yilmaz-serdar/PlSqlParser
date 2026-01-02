@@ -142,3 +142,34 @@
 
 </body>
 </html>
+
+/* Layout örnek: sidebar + content */
+.app { display: flex; }
+.sidebar { width: 260px; } /* sende farklı olabilir */
+
+.content {
+  flex: 1;
+  position: relative; /* overlay bunun içinde konumlanacak */
+  min-height: 100vh;  /* içerik kısa olsa da alan kaplasın */
+}
+
+/* Sadece content alanını kaplar */
+.content-loader{
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,.7);
+  z-index: 9999;
+}
+
+.content-loader.is-active{ display: flex; }
+
+.loader-gif{
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  display: block;
+}
+
