@@ -354,3 +354,39 @@ private async Task<bool> HandleVsqlRecordExceptionAsync(
 
     return true; // sende continue ediyordu; istersen kritik exception’larda false yapıp throw edebilirsin.
 }
+
+SELECT 
+    TO_CHAR(
+        TRUNC(ObjStat.START_TIME, 'HH24') 
+        + FLOOR(TO_NUMBER(TO_CHAR(ObjStat.START_TIME,'MI')) / 20) * 20 / (24*60),
+        'DD-MM-YYYY HH24:MI'
+    ) AS IntervalStart,
+
+    TO_CHAR(
+        TRUNC(ObjStat.START_TIME, 'HH24') 
+        + FLOOR(TO_NUMBER(TO_CHAR(ObjStat.START_TIME,'MI')) / 20) * 20 / (24*60)
+        + (20 / (24*60)),
+        'DD-MM-YYYY HH24:MI'
+    ) AS IntervalEnd,
+
+    SUM(ObjStat.USAGE_COUNT) AS UsageCount,
+    ObjInfo.DML_TYPE AS DmlType
+
+FROM UDPLY.RAKBOL_PRE_OBJECT_STAT ObjStat
+JOIN UDPLY.RAKBOL_PRE_OBJECT ObjInfo 
+    ON ObjStat.SQL_ID = ObjInfo.SQL_ID
+
+WHERE ObjStat.SQL_ID IN (
+        SELECT SQL_ID 
+        FROM UDPLY.RAKBOL_PRE_OBJECT 
+        WHERE OBJECT_NAME = 'COMM_AREA_CUSTOMER'
+    )
+AND ObjStat.START_TIME >= TO_DATE('24-02-2026 00:00:00','DD-MM-YYYY HH24:MI:SS')
+AND ObjStat.START_TIME <  TO_DATE('27-02-2026 23:59:59','DD-MM-YYYY HH24:MI:SS')
+
+GROUP BY 
+    TRUNC(ObjStat.START_TIME, 'HH24') 
+    + FLOOR(TO_NUMBER(TO_CHAR(ObjStat.START_TIME,'MI')) / 20) * 20 / (24*60),
+    ObjInfo.DML_TYPE
+
+ORDER BY IntervalStart DESC;
