@@ -1,38 +1,356 @@
-using System.Data;
-using System.Data.Common;
-
-public abstract class RepositoryBase
+public async Task AnalyzeAsync(MonitoredDatabase monitoredDatabase, CancellationToken token)
 {
-    private readonly Func<DbConnection> _connectionFactory;
+    var analysisStartTime = DateTimeExtension.DateTimeNow;
 
-    protected RepositoryBase(Func<DbConnection> connectionFactory)
-    {
-        _connectionFactory = connectionFactory;
-    }
+    var lastRecordEndTime =
+        await _dbStatRepository.GetLastRecordEndTimeAsync(monitoredDatabase.ServiceName, token);
 
-    protected async Task<T> WithConnection<T>(
-        DbConnection? externalConn,
-        Func<DbConnection, Task<T>> work,
-        CancellationToken ct = default)
+    var (vsqlRecords, fetchDurationSeconds) =
+        await FetchVsqlRecordsAsync(monitoredDatabase, lastRecordEndTime, token);
+
+    LogVsqlFetch(monitoredDatabase, fetchDurationSeconds, vsqlRecords.Count);
+
+    var executionLogId =
+        await _executionLogRepository.StartedLogAsync(
+            monitoredDatabase.ServiceName,
+            analysisStartTime,
+            vsqlRecords.Count,
+            token);
+
+    using var connection = _connectionFactory.Create();
+
+    foreach (var vsqlRecord in vsqlRecords)
     {
-        if (externalConn is not null)
+        token.ThrowIfCancellationRequested();
+
+        try
         {
-            // Dışarıdan geldiyse: aç/kapat/Dispose sana ait değil
-            return await work(externalConn);
+            await ProcessVsqlRecordAsync(monitoredDatabase, lastRecordEndTime, vsqlRecord, connection, token);
         }
+        catch (Exception ex)
+        {
+            var shouldContinue = await HandleVsqlRecordExceptionAsync(monitoredDatabase, vsqlRecord, ex, token);
+            if (shouldContinue)
+                continue;
 
-        await using var conn = _connectionFactory();
-        if (conn.State != ConnectionState.Open)
-            await conn.OpenAsync(ct);
-
-        return await work(conn);
+            throw;
+        }
     }
 
-    protected async Task WithConnection(
-        DbConnection? externalConn,
-        Func<DbConnection, Task> work,
-        CancellationToken ct = default)
+    await _executionLogRepository.CompletedLogAsync(executionLogId, token);
+}
+
+private async Task<(List<VsqlRecord> Records, double DurationSeconds)> FetchVsqlRecordsAsync(
+    MonitoredDatabase monitoredDatabase,
+    DateTime lastRecordEndTime,
+    CancellationToken token)
+{
+    var sw = Stopwatch.StartNew();
+    var records = await _externalDbRepository.GetVsqlRecordsFromAsync(monitoredDatabase, lastRecordEndTime, token);
+    sw.Stop();
+
+    return (records, sw.Elapsed.TotalSeconds);
+}
+
+private void LogVsqlFetch(MonitoredDatabase monitoredDatabase, double durationSeconds, int count)
+{
+    _logger.LogInformation(
+        $"[{DateTimeExtension.DateTimeNow}] DB:{monitoredDatabase.ServiceName} V$SQL-Duration:{durationSeconds} Count:{count}");
+}
+
+private async Task ProcessVsqlRecordAsync(
+    MonitoredDatabase monitoredDatabase,
+    DateTime lastRecordEndTime,
+    VsqlRecord vsqlRecord,
+    IDbConnection connection,
+    CancellationToken token)
+{
+    // 1) Daha önce bu SQL_ID için schema bulunmuş mu?
+    var objectSchema = await _dbSchemaRepository.GetBySqlIdAsync(
+        monitoredDatabase.ServiceName,
+        vsqlRecord.SqlId,
+        token,
+        connection);
+
+    if (objectSchema is null)
     {
-        await WithConnection(externalConn, async c => { await work(c); return 0; }, ct);
+        await CreateSchemaAndObjectsIfNeededAsync(monitoredDatabase, vsqlRecord, connection, token);
     }
+
+    // Şema yoksa CreateSchema... içinde oluşturuldu; tekrar çekmek yerine orada döndürebilirsin.
+    // Burada basit tutmak için yeniden yükleyebilirsin:
+    objectSchema ??= await _dbSchemaRepository.GetBySqlIdAsync(
+        monitoredDatabase.ServiceName,
+        vsqlRecord.SqlId,
+        token,
+        connection);
+
+    if (!IsSchemaEnabled(objectSchema))
+        return;
+
+    await InsertUsageStatAsync(monitoredDatabase, lastRecordEndTime, vsqlRecord, connection, token);
+}
+
+private async Task CreateSchemaAndObjectsIfNeededAsync(
+    MonitoredDatabase monitoredDatabase,
+    VsqlRecord vsqlRecord,
+    IDbConnection connection,
+    CancellationToken token)
+{
+    // 2) SQL text’ten obje listesini çıkar
+    var objectInfoList = _sqlObjectParser.ExtractObjectInfo(vsqlRecord.SqlFullText);
+
+    if (!objectInfoList.Any())
+    {
+        _logger.LogInformation($"[{monitoredDatabase.ServiceName}] - Object could not be found. SQL: {vsqlRecord.SqlFullText}");
+        return;
+    }
+
+    objectInfoList = objectInfoList
+        .Distinct(new SqlObjectItemComparer())
+        .ToList();
+
+    // 3) Obje adlarını normalize et
+    var objectNames = NormalizeObjectNames(objectInfoList);
+
+    // 4) Uygulama objesi mi? (değilse devam etme)
+    var applicationObjects = await _externalDbRepository.GetApplicationObjectSchemasAsync(
+        monitoredDatabase,
+        objectNames,
+        token);
+
+    if (!applicationObjects.Any())
+    {
+        _logger.LogInformation($"[{monitoredDatabase.ServiceName}] - Not an application query. SQL: {vsqlRecord.SqlFullText}");
+        return;
+    }
+
+    // 5) DB object kayıtlarını üret + bulk insert
+    var dbObjects = await BuildDbObjectsAsync(monitoredDatabase, vsqlRecord, objectInfoList, applicationObjects, connection, token);
+    if (dbObjects.Count == 0)
+        return;
+
+    await _dbObjectRepository.BulkInsertAsync(monitoredDatabase.ServiceName, dbObjects, token, connection);
+}
+
+private static List<string> NormalizeObjectNames(List<SqlObjectItem> objectInfoList)
+{
+    var names = objectInfoList
+        .Distinct(new SqlObjectNameComparer())
+        .Select(obj =>
+        {
+            var name = obj.ObjectName;
+            if (name.Contains("."))
+                name = name.Split('.')[1];
+
+            return name.ToUpperInvariant();
+        })
+        .ToList();
+
+    // örnek: DUAL’ı filtrele
+    names = names.Where(x => x != "DUAL").ToList();
+    return names;
+}
+
+private async Task<List<DatabaseObject>> BuildDbObjectsAsync(
+    MonitoredDatabase monitoredDatabase,
+    VsqlRecord vsqlRecord,
+    List<SqlObjectItem> objectInfoList,
+    List<ApplicationObject> applicationObjects,
+    IDbConnection connection,
+    CancellationToken token)
+{
+    var dbObjects = new List<DatabaseObject>(capacity: objectInfoList.Count);
+
+    foreach (var obj in objectInfoList)
+    {
+        var (schemaName, objectName) = SplitSchemaAndObject(obj.ObjectName);
+
+        // Uygulama objeleri listesinde yoksa skip (senin kodunda Any/continue var)
+        if (!applicationObjects.Any(x => x.Object == objectName))
+            continue;
+
+        schemaName = await ResolveSchemaNameAsync(
+            monitoredDatabase,
+            vsqlRecord,
+            schemaName,
+            objectName,
+            applicationObjects,
+            token);
+
+        var objectSchema = await GetOrCreateSchemaAsync(monitoredDatabase, schemaName, connection, token);
+
+        dbObjects.Add(new DatabaseObject
+        {
+            SchemaId = objectSchema.Id,
+            SqlId = vsqlRecord.SqlId,
+            ObjectName = objectName,
+            DmlType = obj.UsageType,
+            CreatedAtText = DateTimeExtension.DateTimeNowText // sende neyse
+        });
+    }
+
+    return dbObjects;
+}
+
+private static (string SchemaName, string ObjectName) SplitSchemaAndObject(string rawObjectName)
+{
+    var objectName = rawObjectName.ToUpperInvariant();
+    var schemaName = string.Empty;
+
+    if (objectName.Contains("."))
+    {
+        var parts = objectName.Split('.');
+        schemaName = parts[0];
+        objectName = parts[1];
+    }
+
+    return (schemaName, objectName);
+}
+
+private async Task<string> ResolveSchemaNameAsync(
+    MonitoredDatabase monitoredDatabase,
+    VsqlRecord vsqlRecord,
+    string schemaName,
+    string objectName,
+    List<ApplicationObject> applicationObjects,
+    CancellationToken token)
+{
+    if (!string.IsNullOrEmpty(schemaName))
+        return schemaName;
+
+    // parsingSchemaName = appObjects.FirstOrDefault(obj => obj.Object == objectName && obj.Schema == vsqlRecord.ParsingSchemaName)
+    var parsingSchema = applicationObjects.FirstOrDefault(obj =>
+        obj.Object == objectName && obj.Schema == vsqlRecord.ParsingSchemaName);
+
+    if (parsingSchema is not null)
+        return parsingSchema.Schema;
+
+    var existsInMultipleSchemas = applicationObjects.Count(x => x.Object == objectName) > 1;
+
+    if (existsInMultipleSchemas)
+    {
+        // synonym owner bul
+        var synonymOwner = await _externalDbRepository.GetSynonymTableOwnerAsync(
+            monitoredDatabase,
+            vsqlRecord.ParsingSchemaName,
+            objectName,
+            token);
+
+        if (!string.IsNullOrEmpty(synonymOwner))
+            return synonymOwner;
+    }
+
+    // fallback: ilk eşleşen schema
+    return applicationObjects.First(x => x.Object == objectName).Schema;
+}
+
+private async Task<DatabaseSchema> GetOrCreateSchemaAsync(
+    MonitoredDatabase monitoredDatabase,
+    string schemaName,
+    IDbConnection connection,
+    CancellationToken token)
+{
+    var objectSchema = await _dbSchemaRepository.GetBySchemaNameAsync(
+        monitoredDatabase.ServiceName,
+        schemaName,
+        token,
+        connection);
+
+    if (objectSchema is not null)
+        return objectSchema;
+
+    objectSchema = new DatabaseSchema
+    {
+        DatabaseId = monitoredDatabase.Id,
+        SchemaName = schemaName,
+        IsEnabled = 1
+    };
+
+    objectSchema.Id = await _dbSchemaRepository.InsertAsync(
+        monitoredDatabase.ServiceName,
+        objectSchema,
+        token,
+        connection);
+
+    return objectSchema;
+}
+
+private bool IsSchemaEnabled(DatabaseSchema objectSchema)
+    => Convert.ToBoolean(objectSchema.IsEnabled);
+
+private async Task InsertUsageStatAsync(
+    MonitoredDatabase monitoredDatabase,
+    DateTime lastRecordEndTime,
+    VsqlRecord vsqlRecord,
+    IDbConnection connection,
+    CancellationToken token)
+{
+    var lastObjectStat = await _dbStatRepository.GetLastRecordBySqlIdAsync(
+        monitoredDatabase.ServiceName,
+        vsqlRecord.SqlId,
+        vsqlRecord.ChildNumber,
+        token,
+        connection);
+
+    var newObjectStat = BuildNewStat(lastObjectStat, lastRecordEndTime, vsqlRecord);
+
+    await _dbStatRepository.InsertAsync(monitoredDatabase.ServiceName, newObjectStat, token, connection);
+}
+
+private static DatabaseStat BuildNewStat(DatabaseStat? lastObjectStat, DateTime lastRecordEndTime, VsqlRecord vsqlRecord)
+{
+    var newObjectStat = new DatabaseStat
+    {
+        SqlId = vsqlRecord.SqlId,
+        ChildNumber = vsqlRecord.ChildNumber,
+        Executions = vsqlRecord.Executions
+    };
+
+    if (lastObjectStat is null)
+    {
+        newObjectStat.StartTime = lastRecordEndTime;
+        newObjectStat.EndTime = vsqlRecord.LastActiveTime;
+        newObjectStat.UsageCount = 0;
+        return newObjectStat;
+    }
+
+    newObjectStat.StartTime = lastObjectStat.EndTime;
+    newObjectStat.EndTime = vsqlRecord.LastActiveTime;
+
+    // executions reset / wrap durumuna karşı guard
+    newObjectStat.UsageCount =
+        vsqlRecord.Executions >= lastObjectStat.Executions
+            ? (vsqlRecord.Executions - lastObjectStat.Executions)
+            : vsqlRecord.Executions;
+
+    return newObjectStat;
+}
+
+/// <summary>
+/// true dönerse loop devam etsin (continue), false dönerse rethrow.
+/// </summary>
+private async Task<bool> HandleVsqlRecordExceptionAsync(
+    MonitoredDatabase monitoredDatabase,
+    VsqlRecord vsqlRecord,
+    Exception ex,
+    CancellationToken token)
+{
+    if (ex is ParseCanceledException)
+    {
+        _logger.LogInformation($"[{monitoredDatabase.ServiceName}] - Parse Canceled Exception. SQL ID: {vsqlRecord.SqlId}");
+        return true;
+    }
+
+    _logger.LogError($"[{monitoredDatabase.ServiceName}] - SQL Analyzer Exception: {ex.Message}");
+
+    await _analyzerExceptionLog.InsertAsync(new AnalyzerExceptionLog
+    {
+        Database = monitoredDatabase.ServiceName,
+        Method = nameof(AnalyzeAsync),
+        Message = "SqlAnalyzer AnalyzeAsync Exception",
+        Detail = ex.ToString()
+    }, token);
+
+    return true; // sende continue ediyordu; istersen kritik exception’larda false yapıp throw edebilirsin.
 }
