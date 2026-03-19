@@ -1,0 +1,184 @@
+public sealed record QueueMessage(
+    Guid Id,
+    string Payload,
+    DateTime CreatedAtUtc
+);
+
+
+public interface IMessageChannel
+{
+    ValueTask PublishAsync(QueueMessage message, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<QueueMessage> ReadAllAsync(CancellationToken cancellationToken = default);
+    int Count { get; }
+    void Complete();
+}
+
+public sealed class MessageChannel : IMessageChannel
+{
+    private readonly Channel<QueueMessage> _channel;
+    private int _count;
+
+    public MessageChannel()
+    {
+        var options = new BoundedChannelOptions(1000)
+        {
+            SingleReader = false,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait,
+            AllowSynchronousContinuations = false
+        };
+
+        _channel = Channel.CreateBounded<QueueMessage>(options);
+    }
+
+    public int Count => Volatile.Read(ref _count);
+
+    public async ValueTask PublishAsync(QueueMessage message, CancellationToken cancellationToken = default)
+    {
+        await _channel.Writer.WriteAsync(message, cancellationToken);
+        Interlocked.Increment(ref _count);
+    }
+
+    public async IAsyncEnumerable<QueueMessage> ReadAllAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var message in _channel.Reader.ReadAllAsync(cancellationToken))
+        {
+            Interlocked.Decrement(ref _count);
+            yield return message;
+        }
+    }
+
+    public void Complete()
+    {
+        _channel.Writer.TryComplete();
+    }
+}
+
+public sealed class MessagePublisher
+{
+    private readonly IMessageChannel _messageChannel;
+    private readonly ILogger<MessagePublisher> _logger;
+
+    public MessagePublisher(IMessageChannel messageChannel, ILogger<MessagePublisher> logger)
+    {
+        _messageChannel = messageChannel;
+        _logger = logger;
+    }
+
+    public async Task PublishAsync(string payload, CancellationToken cancellationToken = default)
+    {
+        var message = new QueueMessage(
+            Id: Guid.NewGuid(),
+            Payload: payload,
+            CreatedAtUtc: DateTime.UtcNow);
+
+        _logger.LogInformation(
+            "Mesaj publish ediliyor. Id={MessageId}, KuyrukBoyutu={QueueCount}",
+            message.Id,
+            _messageChannel.Count);
+
+        await _messageChannel.PublishAsync(message, cancellationToken);
+
+        _logger.LogInformation(
+            "Mesaj publish edildi. Id={MessageId}, YeniKuyrukBoyutu={QueueCount}",
+            message.Id,
+            _messageChannel.Count);
+    }
+}
+
+
+public sealed class MessageProcessor : IMessageProcessor
+{
+    private readonly ILogger<MessageProcessor> _logger;
+
+    public MessageProcessor(ILogger<MessageProcessor> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task ProcessAsync(QueueMessage message, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("İşleniyor: Id={MessageId}, Payload={Payload}", message.Id, message.Payload);
+
+        // Örnek iş yükü
+        await Task.Delay(1000, cancellationToken);
+
+        _logger.LogInformation("Tamamlandı: Id={MessageId}", message.Id);
+    }
+}
+
+
+public sealed class MessageConsumerService : BackgroundService
+{
+    private const int ConsumerCount = 5;
+
+    private readonly IMessageChannel _messageChannel;
+    private readonly IMessageProcessor _messageProcessor;
+    private readonly ILogger<MessageConsumerService> _logger;
+
+    public MessageConsumerService(
+        IMessageChannel messageChannel,
+        IMessageProcessor messageProcessor,
+        ILogger<MessageConsumerService> logger)
+    {
+        _messageChannel = messageChannel;
+        _messageProcessor = messageProcessor;
+        _logger = logger;
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var workers = Enumerable.Range(1, ConsumerCount)
+            .Select(workerId => Task.Run(() => ConsumeAsync(workerId, stoppingToken), stoppingToken))
+            .ToArray();
+
+        return Task.WhenAll(workers);
+    }
+
+    private async Task ConsumeAsync(int workerId, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Consumer {WorkerId} başladı.", workerId);
+
+        try
+        {
+            await foreach (var message in _messageChannel.ReadAllAsync(cancellationToken))
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Consumer {WorkerId} mesaj aldı. Id={MessageId}, KuyrukBoyutu={QueueCount}",
+                        workerId,
+                        message.Id,
+                        _messageChannel.Count);
+
+                    await _messageProcessor.ProcessAsync(message, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Consumer {WorkerId} mesaj işlerken hata aldı. Id={MessageId}",
+                        workerId,
+                        message.Id);
+
+                    // Burada ihtiyaca göre:
+                    // - retry
+                    // - dead-letter
+                    // - loglayıp geç
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Consumer {WorkerId} durduruldu.", workerId);
+        }
+    }
+}
+
+
+
+
+
+
+
