@@ -1,79 +1,28 @@
-SELECT 
-    TO_CHAR(TRUNC(TRANSACTION_TIME, 'HH24'), 'YYYY-MM-DD HH24:MI') AS interval_start,
-    TO_CHAR(TRUNC(TRANSACTION_TIME, 'HH24') + (1/24), 'YYYY-MM-DD HH24:MI') AS interval_end,
-    SUM(USEGE_COUNT) AS total_usege_count
-FROM my_table
-WHERE SQL_ID = '123234'
-GROUP BY TRUNC(TRANSACTION_TIME, 'HH24')
-ORDER BY interval_start;
+<script src="https://unpkg.com/dagre/dist/dagre.min.js"></script>
+<script src="https://unpkg.com/cytoscape-dagre/cytoscape-dagre.js"></script>
 
-SELECT 
-    interval_start,
-    interval_end,
-    SUM(USEGE_COUNT) AS total_usege_count
-FROM (
-    SELECT 
-        TRANSACTION_TIME,
-        TO_CHAR(
-            TRUNC(TRANSACTION_TIME, 'HH24') + FLOOR(TO_NUMBER(TO_CHAR(TRANSACTION_TIME, 'MI')) / 30) * (30/1440),
-            'YYYY-MM-DD HH24:MI'
-        ) AS interval_start,
-        TO_CHAR(
-            TRUNC(TRANSACTION_TIME, 'HH24') + (FLOOR(TO_NUMBER(TO_CHAR(TRANSACTION_TIME, 'MI')) / 30) + 1) * (30/1440),
-            'YYYY-MM-DD HH24:MI'
-        ) AS interval_end
-    FROM my_table
-    WHERE SQL_ID = '123234'
-)
-GROUP BY interval_start, interval_end
-ORDER BY interval_start;
+layout: {
+    name: 'dagre',
 
+    rankDir: 'LR',
 
+    rankSep: 80,
+    nodeSep: 30,
 
+    padding: 20
+}
 
--- SQL_ID girmen gerekiyor
-DEFINE sql_id = '&&SQL_ID';
+layout: {
+    name: 'dagre',
 
-SELECT sql_id,
-       plan_hash_value,
-       MIN(first_load_time) AS first_seen,
-       MAX(last_active_time) AS last_seen,
-       COUNT(DISTINCT plan_hash_value) OVER (PARTITION BY sql_id) AS total_plan_count
-FROM (
-    -- Şu anki planlar (SGA içinden)
-    SELECT sql_id,
-           plan_hash_value,
-           TO_CHAR(first_load_time, 'YYYY-MM-DD HH24:MI:SS') AS first_load_time,
-           TO_CHAR(last_active_time, 'YYYY-MM-DD HH24:MI:SS') AS last_active_time
-    FROM   v$sql
-    WHERE  sql_id = '&&sql_id'
+    rankDir: 'LR',
 
-    UNION ALL
+    rankSep: 60,
+    nodeSep: 20,
 
-    -- AWR’dan geçmiş planlar
-    SELECT sql_id,
-           plan_hash_value,
-           TO_CHAR(MIN(timestamp), 'YYYY-MM-DD HH24:MI:SS') AS first_load_time,
-           TO_CHAR(MAX(timestamp), 'YYYY-MM-DD HH24:MI:SS') AS last_active_time
-    FROM   dba_hist_sql_plan
-    WHERE  sql_id = '&&sql_id'
-    GROUP  BY sql_id, plan_hash_value
-)
-GROUP BY sql_id, plan_hash_value
-ORDER BY first_seen;
+    fit: true,
+    padding: 20,
 
-SELECT sql_id,
-       COUNT(DISTINCT child_number) AS child_count
-FROM   v$sql
-GROUP BY sql_id
-HAVING COUNT(DISTINCT child_number) > 1
-ORDER BY child_count DESC;
-
-
-SELECT sql_id,
-       plan_hash_value,
-       executions,
-       ROUND(elapsed_time / DECODE(executions,0,1,executions) / 1000, 3) AS avg_elapsed_ms
-FROM   v$sql
-WHERE  sql_id = '&&SQL_ID';
-
+    animate: true,
+    animationDuration: 300
+}
