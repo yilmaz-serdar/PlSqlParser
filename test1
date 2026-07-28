@@ -85,3 +85,42 @@ ORDER BY
     AverageUsageCount ASC,
     HourOfDay ASC
 FETCH FIRST 1 ROW ONLY;
+
+
+SELECT
+    TO_CHAR(
+        TRUNC(ObjStat.START_TIME, 'HH24'),
+        'DD-MM-YYYY HH24:MI'
+    ) AS IntervalStart,
+
+    TO_CHAR(
+        TRUNC(ObjStat.START_TIME, 'HH24') + (1 / 24),
+        'DD-MM-YYYY HH24:MI'
+    ) AS IntervalEnd,
+
+    SUM(ObjStat.USAGE_COUNT) AS UsageCount
+
+FROM {SCHEMA_NAME}.{SERVICE_NAME}_OBJECT_STAT ObjStat
+
+WHERE EXISTS (
+    SELECT 1
+    FROM {SCHEMA_NAME}.{SERVICE_NAME}_OBJECT ObjInfo
+    WHERE ObjInfo.SQL_ID = ObjStat.SQL_ID
+      AND ObjInfo.OBJECT_NAME = '{OBJECT_NAME}'
+)
+
+AND ObjStat.START_TIME >= TO_DATE(
+    '{START_TIME}',
+    'DD-MM-YYYY HH24:MI:SS'
+)
+
+AND ObjStat.START_TIME < TO_DATE(
+    '{END_TIME}',
+    'DD-MM-YYYY HH24:MI:SS'
+)
+
+GROUP BY
+    TRUNC(ObjStat.START_TIME, 'HH24')
+
+ORDER BY
+    TRUNC(ObjStat.START_TIME, 'HH24') DESC;
