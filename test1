@@ -1,106 +1,87 @@
-public class ServiceGraphDto
-{
-    public List<ServiceNodeDto> Nodes { get; set; }
-    public List<ServiceEdgeDto> Edges { get; set; }
-}
+WITH HourlyUsage AS
+(
+    SELECT
+        TRUNC(ObjStat.START_TIME, 'HH24') AS IntervalStart,
+        SUM(ObjStat.USAGE_COUNT) AS UsageCount
+    FROM {SCHEMA_NAME}.{SERVICE_NAME}_OBJECT_STAT ObjStat
+    WHERE EXISTS
+    (
+        SELECT 1
+        FROM {SCHEMA_NAME}.{SERVICE_NAME}_OBJECT ObjInfo
+        WHERE ObjInfo.SQL_ID = ObjStat.SQL_ID
+          AND ObjInfo.OBJECT_NAME = '{OBJECT_NAME}'
+    )
+      AND ObjStat.START_TIME >= TO_DATE(
+            '{START_TIME}',
+            'DD-MM-YYYY HH24:MI:SS'
+          )
+      AND ObjStat.START_TIME < TO_DATE(
+            '{END_TIME}',
+            'DD-MM-YYYY HH24:MI:SS'
+          )
+    GROUP BY
+        TRUNC(ObjStat.START_TIME, 'HH24')
+),
+AverageUsageByHour AS
+(
+    SELECT
+        TO_NUMBER(TO_CHAR(IntervalStart, 'HH24')) AS HourOfDay,
+        AVG(UsageCount) AS AverageUsageCount,
+        COUNT(*) AS SampleCount
+    FROM HourlyUsage
+    GROUP BY
+        TO_NUMBER(TO_CHAR(IntervalStart, 'HH24'))
+)
+SELECT
+    LPAD(HourOfDay, 2, '0') || ':00' AS IntervalStart,
+    LPAD(MOD(HourOfDay + 1, 24), 2, '0') || ':00' AS IntervalEnd,
+    ROUND(AverageUsageCount, 2) AS AverageUsageCount,
+    SampleCount
+FROM AverageUsageByHour
+ORDER BY HourOfDay;
 
-public class ServiceNodeDto
-{
-    public string Id { get; set; }
-    public string Label { get; set; }
-}
 
-public class ServiceEdgeDto
-{
-    public string Source { get; set; }
-    public string Target { get; set; }
-    public string CallType { get; set; }
-}
-
-
-{
-  "nodes": [
-    { "id": "X", "label": "X Servisi" },
-    { "id": "Y", "label": "Y Servisi" },
-    { "id": "Z", "label": "Z Servisi" },
-    { "id": "T", "label": "T Servisi" }
-  ],
-  "edges": [
-    { "source": "X", "target": "Y", "callType": "REST" },
-    { "source": "Y", "target": "Z", "callType": "gRPC" },
-    { "source": "Y", "target": "T", "callType": "SOAP" }
-  ]
-}
-
-
-<div id="serviceGraph" style="width:100%; height:600px; border:1px solid #ddd;"></div>
-
-<script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
-
-<script>
-    const graphData = {
-        nodes: [
-            { id: "X", label: "X Servisi" },
-            { id: "Y", label: "Y Servisi" },
-            { id: "Z", label: "Z Servisi" },
-            { id: "T", label: "T Servisi" }
-        ],
-        edges: [
-            { source: "X", target: "Y", callType: "REST" },
-            { source: "Y", target: "Z", callType: "gRPC" },
-            { source: "Y", target: "T", callType: "SOAP" }
-        ]
-    };
-
-    const elements = [
-        ...graphData.nodes.map(n => ({
-            data: { id: n.id, label: n.label }
-        })),
-        ...graphData.edges.map(e => ({
-            data: {
-                source: e.source,
-                target: e.target,
-                label: e.callType
-            }
-        }))
-    ];
-
-    cytoscape({
-        container: document.getElementById('serviceGraph'),
-        elements: elements,
-        style: [
-            {
-                selector: 'node',
-                style: {
-                    'label': 'data(label)',
-                    'background-color': '#1976d2',
-                    'color': '#fff',
-                    'text-valign': 'center',
-                    'text-halign': 'center',
-                    'width': 90,
-                    'height': 45,
-                    'shape': 'round-rectangle'
-                }
-            },
-            {
-                selector: 'edge',
-                style: {
-                    'label': 'data(label)',
-                    'curve-style': 'bezier',
-                    'target-arrow-shape': 'triangle',
-                    'line-color': '#999',
-                    'target-arrow-color': '#999',
-                    'font-size': 12,
-                    'text-background-color': '#fff',
-                    'text-background-opacity': 1,
-                    'text-background-padding': 3
-                }
-            }
-        ],
-        layout: {
-            name: 'breadthfirst',
-            directed: true,
-            padding: 30
-        }
-    });
-</script>
+WITH HourlyUsage AS
+(
+    SELECT
+        TRUNC(ObjStat.START_TIME, 'HH24') AS IntervalStart,
+        SUM(ObjStat.USAGE_COUNT) AS UsageCount
+    FROM {SCHEMA_NAME}.{SERVICE_NAME}_OBJECT_STAT ObjStat
+    WHERE EXISTS
+    (
+        SELECT 1
+        FROM {SCHEMA_NAME}.{SERVICE_NAME}_OBJECT ObjInfo
+        WHERE ObjInfo.SQL_ID = ObjStat.SQL_ID
+          AND ObjInfo.OBJECT_NAME = '{OBJECT_NAME}'
+    )
+      AND ObjStat.START_TIME >= TO_DATE(
+            '{START_TIME}',
+            'DD-MM-YYYY HH24:MI:SS'
+          )
+      AND ObjStat.START_TIME < TO_DATE(
+            '{END_TIME}',
+            'DD-MM-YYYY HH24:MI:SS'
+          )
+    GROUP BY
+        TRUNC(ObjStat.START_TIME, 'HH24')
+),
+AverageUsageByHour AS
+(
+    SELECT
+        TO_NUMBER(TO_CHAR(IntervalStart, 'HH24')) AS HourOfDay,
+        AVG(UsageCount) AS AverageUsageCount,
+        COUNT(*) AS SampleCount
+    FROM HourlyUsage
+    GROUP BY
+        TO_NUMBER(TO_CHAR(IntervalStart, 'HH24'))
+)
+SELECT
+    LPAD(HourOfDay, 2, '0') || ':00' AS IntervalStart,
+    LPAD(MOD(HourOfDay + 1, 24), 2, '0') || ':00' AS IntervalEnd,
+    ROUND(AverageUsageCount, 2) AS AverageUsageCount,
+    SampleCount
+FROM AverageUsageByHour
+ORDER BY
+    AverageUsageCount ASC,
+    HourOfDay ASC
+FETCH FIRST 1 ROW ONLY;
