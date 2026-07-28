@@ -120,6 +120,55 @@ AND ObjStat.START_TIME < TO_DATE(
 )
 
 GROUP BY
+
+
+
+{
+  "databaseName": "PATM1_PRD",
+  "schemaName": "ATM",
+  "objects": [
+    "TRANSACTION",
+    "TRANSACTION_DETAIL",
+    "CARD"
+  ],
+  "analysisPeriod": {
+    "startDate": "2026-07-25T23:00:00+03:00",
+    "endDate": "2026-07-28T23:00:00+03:00",
+    "dayCount": 3,
+    "timeZone": "Europe/Istanbul"
+  },
+  "recommendedWindow": {
+    "startTime": "02:00:00",
+    "endTime": "03:00:00",
+    "averageUsageCount": 4.25,
+    "totalUsageCount": 38
+  },
+  "alternativeWindows": [
+    {
+      "startTime": "03:00:00",
+      "endTime": "04:00:00",
+      "averageUsageCount": 6.8
+    },
+    {
+      "startTime": "04:00:00",
+      "endTime": "05:00:00",
+      "averageUsageCount": 9.4
+    }
+  ],
+  "analyzedObjectCount": 3,
+  "totalUsageCount": 3217,
+  "dataCoverageRate": 100,
+  "recommendationReason": "Gönderilen objelerin belirtilen analiz dönemi içerisindeki saatlik ortalama kullanım değerleri karşılaştırılmış ve en düşük ortalamaya sahip saat aralığı seçilmiştir.",
+  "hourlyUsageStatistics": [
+    {
+      "startTime": "02:00:00",
+      "endTime": "03:00:00",
+      "averageUsageCount": 4.25,
+      "totalUsageCount": 38
+    }
+  ],
+  "generatedAt": "2026-07-28T23:00:01+03:00"
+}
     TRUNC(ObjStat.START_TIME, 'HH24')
 
 ORDER BY
